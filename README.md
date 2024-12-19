@@ -1,6 +1,10 @@
 ### 1.Dataset path
 ```
 /home/fwu/Datasets/3DGS  # root path
+/home/fwu/Datasets/3DGS/360_v2 # path for Mip-Nerf360 dataset(bicycle  bonsai  counter  flowers  garden  kitchen  room  stump  treehill)
+/home/fwu/Datasets/3DGS/tandt_db/tandt # path for Tanks&Temple dataset(train  truck)
+/home/fwu/Datasets/3DGS/tandt_db/db # path for Deep Blending dataset(drjohnson  playroom)
+/home/fwu/Datasets/3DGS/nerf_synthetic # path for Synthetic NeRF(chair  drums  ficus  hotdog  lego  materials  mic ship) colmap needed for sparse point cloud
 ```
 
 ### 2. environment on CU12.4
