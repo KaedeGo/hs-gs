@@ -17,15 +17,15 @@ conda activate gs_cu12
 ```
 python train.py -s <path to COLMAP or NeRF Synthetic dataset> --eval # Train with train/test split
 
-python train.py -s home/fwu/Datasets/3DGS/tandt_db/db/drjohnson --eval --disable_viewer #example
+python train.py -s /home/fwu/Datasets/3DGS/tandt_db/db/playroom -m output/playroom --eval --disable_viewer #example
 
 python render.py -m <path to trained model> # Generate renderings
 
-python render.py -m output/ddb928c4-5/ #example
+python render.py -m output/playroom/ #example
 
 python metrics.py -m <path to trained model> # Compute error metrics on renderings
 
-python metrics.py -m output/ddb928c4-5/ # example
+python metrics.py -m output/playroom/ # example
   SSIM :    0.9026289
   PSNR :   29.4206161
   LPIPS:    0.2388636
