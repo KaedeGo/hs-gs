@@ -190,7 +190,8 @@ class HorseshoeModel:
                 "beta_rho_scale": -4
             }
         ).cuda()
-        self._horseshoe()
+        # self._horseshoe()
+        # TODO: where is the optimazer for self._horseshoe()? turn to line 208-213
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
@@ -203,7 +204,14 @@ class HorseshoeModel:
             {'params': [self._features_rest], 'lr': training_args.feature_lr / 20.0, "name": "f_rest"},
             {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
-            {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"}
+            {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"},
+            # Horseshoe parameters
+            {'params': [self._horseshoe.beta_mean], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
+            {'params': [self._horseshoe.beta_rho], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
+            {'params': [self._horseshoe.lambda_shape], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
+            {'params': [self._horseshoe.lambda_rate], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
+            {'params': [self._horseshoe.theta_shape], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
+            {'params': [self._horseshoe.theta_rate], 'lr': training_args.horseshoe_lr, "name": "horseshoe"}
         ]
 
         if self.optimizer_type == "default":
@@ -329,6 +337,17 @@ class HorseshoeModel:
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
 
         self.active_sh_degree = self.max_sh_degree
+
+        self._horseshoe = Horseshoe(
+            self._scaling,
+            {
+                "horseshoe_scale": 0.01,
+                "weight_cauchy_scale": 1.,
+                "global_cauchy_scale": 1.,
+                "beta_rho_scale": -4
+            }
+        ).cuda()
+        self._horseshoe()
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
