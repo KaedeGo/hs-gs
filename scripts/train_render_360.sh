@@ -36,14 +36,14 @@ done
 for SCENE in $INDOOR_SCENES; do
   if [ ! -d "output/${EXPERIMENT}/${SCENE}/test/ours_30000" ]; then
     echo "Rendering: $SCENE at iteration 30000"
-    python render.py -m "output/${EXPERIMENT}/${SCENE}" --iteration 30000 --resolution 2
+    python render.py -m "output/${EXPERIMENT}/${SCENE}" --iteration 30000 --resolution 2 --skip_train
   else
     echo "Already rendered: $SCENE (30000)"
   fi
 
   if [ ! -d "output/${EXPERIMENT}/${SCENE}/test/ours_7000" ]; then
     echo "Rendering: $SCENE at iteration 7000"
-    python render.py -m "output/${EXPERIMENT}/${SCENE}" --iteration 7000 --resolution 4
+    python render.py -m "output/${EXPERIMENT}/${SCENE}" --iteration 7000 --resolution 2 --skip_train
   else
     echo "Already rendered: $SCENE (7000)"
   fi
@@ -53,14 +53,14 @@ done
 for SCENE in $OUTDOOR_SCENES; do
   if [ ! -d "output/${EXPERIMENT}/${SCENE}/test/ours_30000" ]; then
     echo "Rendering: $SCENE at iteration 30000"
-    python render.py -m "output/${EXPERIMENT}/${SCENE}" --iteration 30000
+    python render.py -m "output/${EXPERIMENT}/${SCENE}" --iteration 30000 --resolution 4 --skip_train
   else
     echo "Already rendered: $SCENE (30000)"
   fi
 
   if [ ! -d "output/${EXPERIMENT}/${SCENE}/test/ours_7000" ]; then
     echo "Rendering: $SCENE at iteration 7000"
-    python render.py -m "output/${EXPERIMENT}/${SCENE}" --iteration 7000
+    python render.py -m "output/${EXPERIMENT}/${SCENE}" --iteration 7000 --resolution 4 --skip_train
   else
     echo "Already rendered: $SCENE (7000)"
   fi
