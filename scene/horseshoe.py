@@ -169,12 +169,15 @@ class Horseshoe(nn.Module):
 
         return -entropy
 
-    def forward(self):
+    def forward(self, reduce=True):
 
         log_lambda = self.lambda_.rsample()
         log_theta = self.theta.rsample()
         sd = torch.log1p(torch.exp(self.beta_rho))
 
         log_prob = torch.distributions.Normal(self.beta_mean, sd * log_lambda * log_theta).log_prob(self.scaling_matrix)
-
-        return - log_prob.mean()
+        
+        if reduce:
+            return - log_prob.mean()
+        else:
+            return - log_prob

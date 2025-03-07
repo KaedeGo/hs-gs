@@ -111,6 +111,10 @@ class HorseshoeModel:
         return self.scaling_activation(self._scaling)
     
     @property
+    def get_log_prob_scaling(self):
+        return self._horseshoe(reduce=False)
+    
+    @property
     def get_rotation(self):
         return self.rotation_activation(self._rotation)
     
