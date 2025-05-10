@@ -1,20 +1,17 @@
 #!/bin/bash
-# nohup sh scripts/train_render_db.sh > train_render_db_p6.log 2>&1 &
+# nohup sh scripts/train_render_nerf_synthetic*.sh > train_render_nerf_synthetic_*.log 2>&1 &
 # close port 3000 in the end
 # netstat -anp |grep 3000
 # lsof -i:3000
 # kill -9 xxxx
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export CUDA_VISIBLE_DEVICES=2
+NAME=hs_*
+EXPERIMENT=nerf_synthetic
+DATA_DIR="/home/fwu/Datasets/3DGS/nerf_synthetic"
+SCENES="chair drums ficus hotdog lego materials mic ship"
 
-export CUDA_VISIBLE_DEVICES=0
-NAME=hs_p6
-
-EXPERIMENT=db
-DATA_DIR="/home/fwu/Datasets/3DGS/db"
-# SCENES="playroom"
-SCENES="drjohnson playroom"
-# RUN_CMD="python3 -m debugpy --listen 3000 --wait-for-client"
 # train process
 for SCENE in $SCENES; do
   if [ -d "output/${NAME}/${EXPERIMENT}/${SCENE}" ]; then
@@ -34,6 +31,13 @@ for SCENE in $SCENES; do
   else
     echo "Already rendered: $SCENE (30000)"
   fi
-done
 
+  # if [ ! -d "output/hs/${EXPERIMENT}/${SCENE}/test/ours_7000" ]; then
+  #   echo "Rendering: $SCENE at iteration 7000"
+  #   python render_uncertainty.py -m "output/hs/${EXPERIMENT}/${SCENE}" --iteration 7000
+  # else
+  #   echo "Already rendered: $SCENE (7000)"
+  # fi
+
+done
 

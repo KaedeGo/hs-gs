@@ -47,15 +47,15 @@ class ParamGroup:
 class ModelParams(ParamGroup): 
     def __init__(self, parser, sentinel=False):
         self.sh_degree = 3
-        self._source_path = ""
-        self._model_path = ""
+        self._source_path = "/home/fwu/Datasets/3DGS/360/room" # path to the dataset
+        self._model_path = "output/hs/360/room" # path to save the model
         self._images = "images"
         self._depths = ""
-        self._resolution = -1
+        self._resolution = 2
         self._white_background = False
         self.train_test_exp = False
         self.data_device = "cuda"
-        self.eval = False
+        self.eval = True
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):

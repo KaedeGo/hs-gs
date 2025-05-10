@@ -9,15 +9,20 @@ from torchmetrics.image import StructuralSimilarityIndexMeasure
 from tqdm import tqdm
 
 ### Metrics Objects
-ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
-lpips = LearnedPerceptualImagePatchSimilarity()
+# ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
+# lpips = LearnedPerceptualImagePatchSimilarity()
+
+from utils.loss_utils import ssim
+from lpipsPyTorch import lpips
+from utils.image_utils import psnr
 
 class SparsificationCurves:
     def __init__(
             self,
             predictions,
             gts,
-            error_type='rmse',
+            diff_to_error_fn=lambda x: x.square().mean(dim=-3),
+            summarizer_fn=lambda x: x.mean(dim=-1).sqrt().mean(),
             P=100,
         ) -> None:
         '''
@@ -48,12 +53,8 @@ class SparsificationCurves:
 
         self.predictions = predictions  # dict of tensor of shape (..., C, H, W, S)
         self.gts = gts.unsqueeze(-1)    # a single tensor of shape (..., C, H, W, 1)
-        if error_type == 'rmse':
-            self.diff_to_error_fn=lambda x: x.square().mean(dim=-3),
-            self.summarizer_fn=lambda x: x.mean(dim=-1).sqrt().mean(),
-        elif error_type == 'mae':
-            self.diff_to_error_fn=lambda x: x.abs().mean(dim=-3),
-            self.summarizer_fn=lambda x: x.mean(),
+        self.diff_to_error_fn = diff_to_error_fn
+        self.summarizer_fn = summarizer_fn
 
         self.errors = {}
         self.uncertainties = {}
@@ -73,10 +74,10 @@ class SparsificationCurves:
         self.HW = self.gts.shape[-3] * self.gts.shape[-2]                 # H * W        
         self.percentage_ax = torch.arange(0, self.HW, self.HW/P, device=self.gts.device).round().int()
 
-        if ssim.device != self.gts.device:
-            ssim.to(self.gts.device)
-        if lpips.device != self.gts.device:
-            lpips.to(self.gts.device)
+        # if ssim.device != self.gts.device:
+        #     ssim.to(self.gts.device)
+        # if lpips.device != self.gts.device:
+        #     lpips.to(self.gts.device)
 
     def _compute_error(self, predictions, gts):
         # predictions:  (..., C, H, W, S)
@@ -121,27 +122,45 @@ class SparsificationCurves:
         # gts:          (..., C, H, W, 1)
         # output:       (...)
         mean_pred = predictions.mean(dim=-1, keepdim=True)
-        diff = mean_pred - gts
-        assert diff.shape[-1] == 1
-        diff = diff.squeeze(-1)
-        output = diff.square().mean(dim=(-3,-2,-1)).log10().mul(-10).mean()
-        return output
+        # diff = mean_pred - gts
+        # assert diff.shape[-1] == 1
+        # diff = diff.squeeze(-1)
+        # output = diff.square().mean(dim=(-3,-2,-1)).log10().mul(-10).mean()
+        # return output
+        mean_pred = mean_pred.squeeze(-1)
+        gts = gts.squeeze(-1)
+        psnrs = []
+        for i in range(mean_pred.shape[0]):
+            psnrs.append(psnr(mean_pred[i], gts[i]))
+        return torch.stack(psnrs).mean()
     
     def _compute_ssim(self, predictions, gts):
         # predictions:  (..., C, H, W, S)
         # gts:          (..., C, H, W, 1)
         # output:       (...)
         mean_pred = predictions.mean(dim=-1, keepdim=True)
-        output = ssim(mean_pred.squeeze(-1), gts.squeeze(-1))
-        return output.mean()
+        # output = ssim(mean_pred.squeeze(-1), gts.squeeze(-1))
+        # return output.mean()
+        mean_pred = mean_pred.squeeze(-1)
+        gts = gts.squeeze(-1)
+        ssims = []
+        for i in range(mean_pred.shape[0]):
+            ssims.append(ssim(mean_pred[i], gts[i]))
+        return torch.stack(ssims).mean()
     
     def _compute_lpips(self, predictions, gts):
         # predictions:  (..., C, H, W, S)
         # gts:          (..., C, H, W, 1)
         # output:       (...)
         mean_pred = predictions.mean(dim=-1, keepdim=True)
-        output = lpips(mean_pred.squeeze(-1), gts.squeeze(-1))
-        return output.mean()
+        # output = lpips(mean_pred.squeeze(-1), gts.squeeze(-1))
+        # return output.mean()
+        lpipses = []
+        mean_pred = mean_pred.squeeze(-1).to(device='cuda')
+        gts = gts.squeeze(-1).to(device='cuda')
+        for i in range(mean_pred.shape[0]):
+            lpipses.append(lpips(mean_pred[i], gts[i], net_type='vgg'))
+        return torch.stack(lpipses).mean()
     
     def compute_AUSE(self, k='us'):
         sc = self._get_sparsification_curve(self.uncertainties[k], self.errors[k])
@@ -164,50 +183,62 @@ class SparsificationCurves:
         }
         rand = torch.rand(self.gts.shape[:-4]+(self.HW,), device=self.gts.device)
         for k in self.predictions.keys():
+            all_results['names'].append(k)
+            all_results['sc'][k] = self._get_sparsification_curve(self.uncertainties[k], self.errors[k])
+            all_results['sc_oracle'][k] = self._get_sparsification_curve(self.errors[k], self.errors[k])
+            all_results['sc_random'][k] = self._get_sparsification_curve(rand, self.errors[k])
+            all_results['ausc'][k] = self._compute_area_under_sparsification_curve(all_results['sc'][k])
+            all_results['ause'][k] = self._compute_area_under_sparsification_curve(all_results['sc_oracle'][k]-all_results['sc'][k]).abs()
+            all_results['psnr'][k] = self._compute_psnr(self.predictions[k], self.gts)
             if basic_only:
-                all_results['names'].append(k)
-                all_results['psnr'][k] = self._compute_psnr(self.predictions[k], self.gts)
-                all_results['ssim'][k] = self._compute_ssim(self.predictions[k], self.gts)
-                all_results['lpips'][k] = self._compute_lpips(self.predictions[k], self.gts)
-            else:
-                all_results['sc'][k] = self._get_sparsification_curve(self.uncertainties[k], self.errors[k])
-                all_results['sc_oracle'][k] = self._get_sparsification_curve(self.errors[k], self.errors[k])
-                all_results['sc_random'][k] = self._get_sparsification_curve(rand, self.errors[k])
-                all_results['ausc'][k] = self._compute_area_under_sparsification_curve(all_results['sc'][k])
-                all_results['ause'][k] = self._compute_area_under_sparsification_curve(all_results['sc_oracle'][k]-all_results['sc'][k]).abs()
-
+                continue
+            all_results['ssim'][k] = self._compute_ssim(self.predictions[k], self.gts)
+            all_results['lpips'][k] = self._compute_lpips(self.predictions[k], self.gts)
         return self.percentage_ax/self.HW, all_results
 
-def get_CFNeRF(root, device='cpu'):
-    rgbs_path = glob.glob(os.path.join(root, f'rgbs_*.npy'))
-    rgbs_path += glob.glob(os.path.join(root, f'data*.npz'))
-    print(root, len(rgbs_path))
-    def extract_iter(path:str):
-        if path.endswith('.npz'):
-            # example *data_123.npy.npz -> 123
-            return int(re.search(r'data_(\d+).npy.npz', path).group(1))
-        else:
-            # example rgbs_123.npy -> 123
-            return int(re.search(r'rgbs_(\d+).npy', path).group(1))
-    rgbs_path = sorted(rgbs_path, key=extract_iter)
-    rgbs = []
-    for rgb_path in tqdm(rgbs_path):
-        if rgb_path.endswith('.npz'):
-            yolo = np.load(rgb_path)['rgbs']
-        else:
-            yolo = np.load(rgb_path)
-        rgbs.append(torch.from_numpy(yolo).permute(2,0,1,3).float())
-    rgbs = torch.stack(rgbs).to(device)
-    return rgbs
+# def get_CFNeRF(root, device='cpu'):
+#     rgbs_path = glob.glob(os.path.join(root, f'rgbs_*.npy'))
+#     rgbs_path += glob.glob(os.path.join(root, f'data*.npz'))
+#     print(root, len(rgbs_path))
+#     def extract_iter(path:str):
+#         if path.endswith('.npz'):
+#             # example *data_123.npy.npz -> 123
+#             return int(re.search(r'data_(\d+).npy.npz', path).group(1))
+#         else:
+#             # example rgbs_123.npy -> 123
+#             return int(re.search(r'rgbs_(\d+).npy', path).group(1))
+#     rgbs_path = sorted(rgbs_path, key=extract_iter)
+#     rgbs = []
+#     for rgb_path in tqdm(rgbs_path):
+#         if rgb_path.endswith('.npz'):
+#             yolo = np.load(rgb_path)['rgbs']
+#         else:
+#             yolo = np.load(rgb_path)
+#         rgbs.append(torch.from_numpy(yolo).permute(2,0,1,3).float())
+#     rgbs = torch.stack(rgbs).to(device)
+#     return rgbs
 
-def get_GS(root, device='cpu'):
+def get_CFNeRF(root, device='cpu'):
     rgbs_path = sorted(glob.glob(os.path.join(root, f'renders/idx*.pt')))
     gts_path = sorted(glob.glob(os.path.join(root, f'gt/*.png')))
     print(root, len(rgbs_path))
     rgbs = []
     gts = []
     for rgb_path, gt_path in tqdm(zip(rgbs_path, gts_path)):
-        rgbs.append(torch.load(rgb_path, 'cpu').permute(1,2,3,0).float())
+        rgbs.append(torch.load(rgb_path, 'cpu', weights_only=True).permute(2,0,1,3).float())
+        gts.append(read_image(gt_path).float() / 255.)
+    rgbs = torch.stack(rgbs).to(device)
+    gts = torch.stack(gts).to(device)
+    return rgbs, gts
+
+def get_GS(root, device='cpu'):
+    rgbs_path = sorted(glob.glob(os.path.join(root, f'renders/*.pt')))
+    gts_path = sorted(glob.glob(os.path.join(root, f'gt/*.png')))
+    print(root, len(rgbs_path))
+    rgbs = []
+    gts = []
+    for rgb_path, gt_path in tqdm(zip(rgbs_path, gts_path)):
+        rgbs.append(torch.load(rgb_path, 'cpu', weights_only=True).permute(1,2,3,0).float())
         gts.append(read_image(gt_path).float() / 255.)
     rgbs = torch.stack(rgbs).to(device)
     gts = torch.stack(gts).to(device)

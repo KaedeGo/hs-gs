@@ -15,7 +15,7 @@ from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
-from scene import Scene, GaussianModel, HorseshoeModel
+from scene import Scene, HorseshoeModel
 from utils.general_utils import safe_state, get_expon_lr_func
 import uuid
 from tqdm import tqdm
@@ -125,7 +125,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             ssim_value = ssim(image, gt_image)
 
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim_value)
-        loss += gaussians._horseshoe() * 0.0001
+        loss += gaussians._horseshoe() * 0.000005
 
         # Depth regularization
         Ll1depth_pure = 0.0
@@ -142,6 +142,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             Ll1depth = 0
 
         loss.backward()
+
+        torch.nn.utils.clip_grad_norm_([gaussians._horseshoe.theta_shape, gaussians._horseshoe.theta_rate], 5.0)
 
         iter_end.record()
 
@@ -263,10 +265,10 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 18_000, 22_000, 24_000, 30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 18_000, 22_000, 24_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument('--disable_viewer', action='store_true', default=False)
+    parser.add_argument('--disable_viewer', action='store_true', default=True)
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     args = parser.parse_args(sys.argv[1:])

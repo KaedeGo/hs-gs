@@ -65,30 +65,42 @@ class Horseshoe(nn.Module):
         self.prior_tau_shape = torch.Tensor([0.5])
 
         # local shrinkage parameters
-        self.prior_lambda_shape = torch.Tensor([0.5])
-        self.prior_lambda_rate = nn.Parameter(torch.Tensor([1 / priors["weight_cauchy_scale"] ** 2]))
+        self.prior_lambda_shape = torch.Tensor([3])
+        self.prior_lambda_rate = torch.Tensor([1 / priors["weight_cauchy_scale"] ** 2]) # (1)
+        # self.prior_lambda_rate = nn.Parameter(torch.Tensor([1 / priors["weight_cauchy_scale"] ** 2])) # (1)
 
         # global shrinkage parameters
-        self.prior_v_shape = torch.Tensor([0.5])
+        # self.prior_v_shape = torch.Tensor([0.5])
         self.prior_theta_shape = torch.Tensor([0.5])
         self.prior_theta_rate = torch.Tensor([1 / priors["global_cauchy_scale"] ** 2])
 
         # Initialization of parameters of variational distribution
         # weight parameters
-        self.beta_mean = nn.Parameter(torch.Tensor(scaling_matrix.shape).uniform_(-scale, scale))
-        self.beta_rho = nn.Parameter(torch.ones(scaling_matrix.shape) * priors["beta_rho_scale"])
+        self.beta_mean = nn.Parameter(torch.Tensor(scaling_matrix.shape).uniform_(-scale, scale)) # (N, 3)
+        self.beta_rho = nn.Parameter(torch.ones(scaling_matrix.shape) * priors["beta_rho_scale"]) # (N, 3)
 
         # local shrinkage parameters
-        self.lambda_shape = nn.Parameter(self.prior_lambda_shape * torch.ones(scaling_matrix.shape))
-        self.lambda_rate = nn.Parameter(self.prior_lambda_rate * torch.ones(scaling_matrix.shape))
-        self.lambda_ = InverseGamma(self.lambda_shape, self.lambda_rate)
+        self.lambda_shape = nn.Parameter(self.prior_lambda_shape * torch.ones(scaling_matrix.shape)) # (N, 3)
+        self.lambda_rate = nn.Parameter(self.prior_lambda_rate * torch.ones(scaling_matrix.shape)) # (N, 3)
+        # self.lambda_ = InverseGamma(self.lambda_shape, self.lambda_rate)
 
         # global shrinkage parameters
-        self.theta_shape = nn.Parameter(self.prior_theta_shape)
-        self.theta_rate = nn.Parameter(self.prior_theta_rate)
+        # self.theta_shape_raw = nn.Parameter(self.prior_theta_shape)
+        # self.theta_rate_raw = nn.Parameter(self.prior_theta_rate)
+
+        self.theta_shape = nn.Parameter(self.prior_theta_shape) # (1)
+        self.theta_rate = nn.Parameter(self.prior_theta_rate) # (1)
         self.theta = InverseGamma(self.theta_shape, self.theta_rate)
 
-        self.scaling_matrix = scaling_matrix
+        self.scaling_matrix = scaling_matrix # (N, 3)
+
+    # @property
+    # def theta_shape(self):
+    #     return self.theta_shape_raw.clamp(min=1e-3, max=10)
+
+    # @property
+    # def theta_rate(self):
+    #     return self.theta_rate_raw.clamp(min=1e-3, max=10)
 
 
     def log_prior(self):
@@ -169,15 +181,49 @@ class Horseshoe(nn.Module):
 
         return -entropy
 
-    def forward(self, reduce=True):
+    def forward(self):
+        assert not torch.isnan(self.beta_mean).any(), "beta_mean contains nan!"
+        assert not torch.isnan(self.beta_rho).any(), "beta_rho contains nan!"
+        assert not torch.isnan(self.lambda_shape).any(), "lambda_shape contains nan!"
+        assert not torch.isnan(self.lambda_rate).any(), "lambda_rate contains nan!"
+        assert not torch.isnan(self.theta_shape).any(), "theta_shape contains nan!"
+        assert not torch.isnan(self.theta_rate).any(), "theta_rate contains nan!"
+        self.safe_lambda_shape = self.lambda_shape.clamp(min=1e-2, max=2)
+        self.safe_lambda_rate = self.lambda_rate.clamp(min=1e-2, max=2)
+        self.lambda_ = InverseGamma(self.safe_lambda_shape, self.safe_lambda_rate)
+        self.safe_theta_shape = self.theta_shape.clamp(min=1e-2, max=2)
+        self.safe_theta_rate = self.theta_rate.clamp(min=1e-2, max=2)
+        self.theta = InverseGamma(self.safe_theta_shape, self.safe_theta_rate)
 
-        log_lambda = self.lambda_.rsample()
-        log_theta = self.theta.rsample()
-        sd = torch.log1p(torch.exp(self.beta_rho))
-
-        log_prob = torch.distributions.Normal(self.beta_mean, sd * log_lambda * log_theta).log_prob(self.scaling_matrix)
-        
-        if reduce:
-            return - log_prob.mean()
-        else:
-            return - log_prob
+        for i in range(10):
+            log_lambda = self.lambda_.rsample().clamp(min=1e-4, max=1)
+            log_theta = self.theta.rsample().clamp(min=1e-4, max=1)
+            sd = torch.nn.functional.softplus(self.beta_rho)
+            # sd = torch.log1p(torch.exp(self.beta_rho))
+            scale = (sd * log_lambda * log_theta).clamp(min=1e-4)
+            if not torch.isnan(scale).any():
+                log_prob = torch.distributions.Normal(self.beta_mean, scale).log_prob(self.scaling_matrix)
+                return - log_prob.mean()
+            else:
+                if i < 9:
+                    continue
+                else:
+                    raise Exception("log_prob computation ran into nan!")
+            # if torch.isnan(log_prob).any() and i < 9:
+            #     continue
+            # elif torch.isnan(log_prob).any() and i == 9:
+            #     raise Exception("log_prob computation ran into nan!")
+            # else:
+            #     break
+            
+    
+    def sample(self, n_samples=1):
+        self.lambda_ = InverseGamma(self.lambda_shape, self.lambda_rate)
+        self.theta = InverseGamma(self.theta_shape, self.theta_rate)
+        log_lambda = self.lambda_.rsample().clamp(min=1e-4, max=1)
+        log_theta = self.theta.rsample().clamp(min=1e-4, max=1)
+        sd = torch.nn.functional.softplus(self.beta_rho)
+        eps = torch.distributions.Normal(0, sd * log_lambda * log_theta).rsample(sample_shape=(n_samples, ))
+        scaling = self.scaling_matrix + eps
+        # scaling_sample = torch.distributions.Normal(self.scaling_matrix, sd * log_lambda * log_theta).rsample(sample_shape=(n_samples, ))
+        return scaling # shape: (N, 3)

@@ -10,103 +10,77 @@
 #
 import torch
 from sparsification_curves import SparsificationCurves, get_GS
-
-from pathlib import Path
-import os
-import torch
 import json
-from argparse import ArgumentParser
-
+import argparse
 
 @torch.no_grad()
-def compute_metrics(experiment_path, device='cpu'):
+def compute_metrics_rmse(experiment_path, basic_only, device):
     pred, gt = get_GS(experiment_path, device=device)
-    sc_rmse = SparsificationCurves(
+    sc = SparsificationCurves(
         predictions=pred,
         gts=gt,
-        error_type = 'rmse', # 'rmse' or 'mae'
+        # RMSE
+        diff_to_error_fn=lambda x: x.square().mean(dim=-3),
+        summarizer_fn=lambda x: x.mean(dim=-1).sqrt().mean(),
+        # # PSNR
+        # diff_to_error_fn=lambda x: x.square().mean(dim=-3),
+        # summarizer_fn=lambda x: x.mean(dim=-1).log10().mul(-10).mean(),
+        # # MAE
+        # diff_to_error_fn=lambda x: x.abs().mean(dim=-3),
+        # summarizer_fn=lambda x: x.mean(),
     )
-
-    sc_mae = SparsificationCurves(
-        predictions=pred,
-        gts=gt,
-        error_type = 'mae', # 'rmse' or 'mae'
-    )
-    _, all_basic_results = sc_rmse.get_all(basic_only=True)
-    _, all_ause_rmse_results = sc_rmse.get_all(basic_only=False)
-    _, all_ause_mae_results = sc_mae.get_all(basic_only=False)
-    all_results = {
-        'name': all_basic_results['name'],
-        'psnr': all_basic_results['psnr'],
-        'ssim': all_basic_results['ssim'],
-        'lpips': all_basic_results['lpips'],
-        'ause_rmse': all_ause_rmse_results['ause'],
-        'ause_mae': all_ause_mae_results['ause'],
-    }
+    _, all_results = sc.get_all(basic_only=basic_only)
+    all_results.pop('names')
+    if basic_only:
+        all_results.pop('ssim')
+        all_results.pop('lpips')
     mean = {k:v['us'].mean().item() for k,v in all_results.items()}
-    return all_results, mean
+    return mean
 
+@torch.no_grad()
+def compute_metrics_mae(experiment_path, basic_only, device):
+    pred, gt = get_GS(experiment_path, device=device)
+    sc = SparsificationCurves(
+        predictions=pred,
+        gts=gt,
+        # RMSE
+        # diff_to_error_fn=lambda x: x.square().mean(dim=-3),
+        # summarizer_fn=lambda x: x.mean(dim=-1).sqrt().mean(),
+        # # PSNR
+        # diff_to_error_fn=lambda x: x.square().mean(dim=-3),
+        # summarizer_fn=lambda x: x.mean(dim=-1).log10().mul(-10).mean(),
+        # # MAE
+        diff_to_error_fn=lambda x: x.abs().mean(dim=-3),
+        summarizer_fn=lambda x: x.mean(),
+    )
+    _, all_results = sc.get_all(basic_only=basic_only)
+    all_results.pop('names')
+    if basic_only:
+        all_results.pop('ssim')
+        all_results.pop('lpips')
+    mean = {k:v['us'].mean().item() for k,v in all_results.items()}
+    return mean
 
-def evaluate(model_paths):
-
-    full_dict = {}
-    per_view_dict = {}
-    full_dict_polytopeonly = {}
-    per_view_dict_polytopeonly = {}
-    print("")
-
-    for scene_dir in model_paths:
-        try:
-            print("Scene:", scene_dir)
-            full_dict[scene_dir] = {}
-            per_view_dict[scene_dir] = {}
-            full_dict_polytopeonly[scene_dir] = {}
-            per_view_dict_polytopeonly[scene_dir] = {}
-
-            test_dir = Path(scene_dir) / "test"
-
-            for method in os.listdir(test_dir):
-                print("Method:", method)
-
-                full_dict[scene_dir][method] = {}
-                per_view_dict[scene_dir][method] = {}
-                full_dict_polytopeonly[scene_dir][method] = {}
-                per_view_dict_polytopeonly[scene_dir][method] = {}
-
-                method_dir = test_dir / method
-
-                all_result, mean = compute_metrics(method_dir, basic_only=True, device=torch.device("cuda:0"))
-
-                print("  SSIM : {:>12.7f}".format(mean['ssim'], ".5"))
-                print("  PSNR : {:>12.7f}".format(mean['psnr'], ".5"))
-                print("  LPIPS: {:>12.7f}".format(mean['lpips'], ".5"))
-                print("  AUSE RMSE: {:>12.7f}".format(mean['ause_rmse'], ".5"))
-                print("  AUSE MAE: {:>12.7f}".format(mean['ause_mae'], ".5"))
-                print("")
-
-                full_dict[scene_dir][method].update({"SSIM": mean['ssim'],
-                                                        "PSNR": mean['psnr'],
-                                                        "LPIPS": mean['lpips'],
-                                                        "AUSE RMSE": mean['ause_rmse'],
-                                                        "AUSE MAE": mean['ause_mae']})
-                per_view_dict[scene_dir][method].update({"SSIM": {name: ssim for ssim, name in zip(all_result['ssim'], all_result['name'])},
-                                                        "PSNR": {name: psnr for psnr, name in zip(all_result['psnr'], all_result['name'])},
-                                                        "LPIPS": {name: lp for lp, name in zip(all_result['lpips'], all_result['name'])},
-                                                        "AUSE RMSE": {name: ause for ause, name in zip(all_result['ause_rmse'], all_result['name'])},
-                                                        "AUSE MAE": {name: ause for ause, name in zip(all_result['ause_mae'], all_result['name'])}})
-            with open(scene_dir + "/results.json", 'w') as fp:
-                json.dump(full_dict[scene_dir], fp, indent=True)
-            with open(scene_dir + "/per_view.json", 'w') as fp:
-                json.dump(per_view_dict[scene_dir], fp, indent=True)
-        except:
-            print("Unable to compute metrics for model", scene_dir)
-
-if __name__ == "__main__":
-    device = torch.device("cuda:0")
-    torch.cuda.set_device(device)
-
-    # Set up command line argument parser
-    parser = ArgumentParser(description="Training script parameters")
-    parser.add_argument('--model_paths', '-m', required=True, nargs="+", type=str, default=[])
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--experiment_path', type=str, default='')
+    parser.add_argument('--basic_only', action='store_true', default=False)
+    parser.add_argument('--device', type=str, default='cpu')
     args = parser.parse_args()
-    evaluate(args.model_paths)
+    print(args.experiment_path)
+    df_rmse = compute_metrics_rmse(args.experiment_path, args.basic_only, args.device)
+    df_mae = compute_metrics_mae(args.experiment_path, args.basic_only, args.device)
+    
+    results = {}
+    assert df_rmse['psnr'] == df_mae['psnr']
+    assert df_rmse['ssim'] == df_mae['ssim']
+    assert df_rmse['lpips'] == df_mae['lpips']
+    results['psnr'] = df_rmse['psnr']
+    results['ssim'] = df_rmse['ssim']
+    results['lpips'] = df_rmse['lpips']
+    results['ause_rmse'] = df_rmse['ause']
+    results['ause_mae'] = df_mae['ause']
+    print(results)
+
+    with open(args.experiment_path + "/results.json", 'w') as fp:
+        json.dump(results, fp, indent=True)

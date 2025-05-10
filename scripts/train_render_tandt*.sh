@@ -1,5 +1,5 @@
 #!/bin/bash
-# nohup sh scripts/train_render_tandt.sh > train_render_tandt_p6.log 2>&1 &
+# nohup sh scripts/train_render_tandt*.sh > train_render_tandt_*.log 2>&1 &
 # close port 3000 in the end
 # netstat -anp |grep 3000
 # lsof -i:3000
@@ -7,7 +7,7 @@
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export CUDA_VISIBLE_DEVICES=3
-NAME=hs_p6
+NAME=hs_*
 EXPERIMENT=tandt
 DATA_DIR="/home/fwu/Datasets/3DGS/tandt"
 SCENES="train truck"
@@ -24,7 +24,7 @@ done
 
 # render process
 for SCENE in $SCENES; do
-  if [ ! -d "output/hs_*/${EXPERIMENT}/${SCENE}/test/ours_30000" ]; then
+  if [ ! -d "output/${NAME}/${EXPERIMENT}/${SCENE}/test/ours_30000" ]; then
     echo "Rendering: $SCENE at iteration 30000"
     python render_uncertainty.py -m "output/${NAME}/${EXPERIMENT}/${SCENE}" --iteration 30000 --resolution 2
     python metrics_uncertainty.py --experiment_path "output/${NAME}/${EXPERIMENT}/${SCENE}/test/ours_30000"

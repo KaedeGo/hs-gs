@@ -29,6 +29,13 @@ try:
 except:
     pass
 
+horseshoe_priors = {
+    "horseshoe_scale": 0.01,
+    "weight_cauchy_scale": 1.,
+    "global_cauchy_scale": 1.,
+    "beta_rho_scale": -6 #
+    }
+
 
 class HorseshoeModel:
 
@@ -58,6 +65,8 @@ class HorseshoeModel:
         self._features_dc = torch.empty(0)
         self._features_rest = torch.empty(0)
         self._scaling = torch.empty(0)
+        # TODO: add horseshoe parameters
+        self._horseshoe = None
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
         self.max_radii2D = torch.empty(0)
@@ -79,6 +88,14 @@ class HorseshoeModel:
             self._features_dc,
             self._features_rest,
             self._scaling,
+            # TODO: add horseshoe parameters
+            self._horseshoe.prior_lambda_rate,
+            self._horseshoe.beta_mean,
+            self._horseshoe.beta_rho,
+            self._horseshoe.lambda_shape,
+            self._horseshoe.lambda_rate,
+            self._horseshoe.theta_shape,
+            self._horseshoe.theta_rate,
             self._rotation,
             self._opacity,
             self.max_radii2D,
@@ -94,6 +111,14 @@ class HorseshoeModel:
         self._features_dc, 
         self._features_rest,
         self._scaling, 
+        # TODO: add horseshoe parameters
+        # horseshoe_prior_lambda_rate,
+        horseshoe_beta_mean,
+        horseshoe_beta_rho,
+        horseshoe_lambda_shape,
+        horseshoe_lambda_rate,
+        horseshoe_theta_shape,
+        horseshoe_theta_rate,
         self._rotation, 
         self._opacity,
         self.max_radii2D, 
@@ -101,6 +126,17 @@ class HorseshoeModel:
         denom,
         opt_dict, 
         self.spatial_lr_scale) = model_args
+        self._horseshoe = Horseshoe(
+            self._scaling,
+            horseshoe_priors
+        ).cuda()
+        # self._horseshoe.prior_lambda_rate = nn.Parameter(torch.tensor(horseshoe_prior_lambda_rate, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.beta_mean = nn.Parameter(torch.tensor(horseshoe_beta_mean, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.beta_rho = nn.Parameter(torch.tensor(horseshoe_beta_rho, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.lambda_shape = nn.Parameter(torch.tensor(horseshoe_lambda_shape, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.lambda_rate = nn.Parameter(torch.tensor(horseshoe_lambda_rate, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.theta_shape = nn.Parameter(torch.tensor(horseshoe_theta_shape, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.theta_rate = nn.Parameter(torch.tensor(horseshoe_theta_rate, dtype=torch.float, device="cuda").requires_grad_(True))
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
         self.denom = denom
@@ -110,9 +146,9 @@ class HorseshoeModel:
     def get_scaling(self):
         return self.scaling_activation(self._scaling)
     
-    @property
-    def get_log_prob_scaling(self):
-        return self._horseshoe(reduce=False)
+    # TODO: sample scaling from horseshoe distribution
+    def get_horseshoe_scaling(self, n_samples=1):
+        return  self.scaling_activation(self._horseshoe.sample(n_samples))
     
     @property
     def get_rotation(self):
@@ -153,6 +189,11 @@ class HorseshoeModel:
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
 
+    def get_horseshoe_covariance(self, scaling_modifier = 1, n_samples=1):
+        scaling = self.get_horseshoe_scaling(n_samples)
+        covariance = [self.covariance_activation(s, scaling_modifier, self._rotation) for s in scaling]
+        return torch.stack(covariance, dim=0)
+    
     def oneupSHdegree(self):
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
@@ -187,15 +228,8 @@ class HorseshoeModel:
         self._exposure = nn.Parameter(exposure.requires_grad_(True))
         self._horseshoe = Horseshoe(
             self._scaling,
-            {
-                "horseshoe_scale": 0.01,
-                "weight_cauchy_scale": 1.,
-                "global_cauchy_scale": 1.,
-                "beta_rho_scale": -4
-            }
+            horseshoe_priors
         ).cuda()
-        # self._horseshoe()
-        # TODO: where is the optimazer for self._horseshoe()? turn to line 208-213
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
@@ -207,15 +241,16 @@ class HorseshoeModel:
             {'params': [self._features_dc], 'lr': training_args.feature_lr, "name": "f_dc"},
             {'params': [self._features_rest], 'lr': training_args.feature_lr / 20.0, "name": "f_rest"},
             {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
-            {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"},
+            {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             # Horseshoe parameters
-            {'params': [self._horseshoe.beta_mean], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
-            {'params': [self._horseshoe.beta_rho], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
-            {'params': [self._horseshoe.lambda_shape], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
-            {'params': [self._horseshoe.lambda_rate], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
-            {'params': [self._horseshoe.theta_shape], 'lr': training_args.horseshoe_lr, "name": "horseshoe"},
-            {'params': [self._horseshoe.theta_rate], 'lr': training_args.horseshoe_lr, "name": "horseshoe"}
+            # {'params': [self._horseshoe.prior_lambda_rate], 'lr': training_args.horseshoe_lr, "name": "horseshoe_prior_lambda_rate"},
+            {'params': [self._horseshoe.beta_mean], 'lr': training_args.horseshoe_lr, "name": "horseshoe_beta_mean"},
+            {'params': [self._horseshoe.beta_rho], 'lr': training_args.horseshoe_lr, "name": "horseshoe_beta_rho"},
+            {'params': [self._horseshoe.lambda_shape], 'lr': training_args.horseshoe_lr, "name": "horseshoe_lambda_shape"},
+            {'params': [self._horseshoe.lambda_rate], 'lr': training_args.horseshoe_lr, "name": "horseshoe_lambda_rate"},
+            {'params': [self._horseshoe.theta_shape], 'lr': 0.1*training_args.horseshoe_lr, "name": "horseshoe_theta_shape"},
+            {'params': [self._horseshoe.theta_rate], 'lr': 0.1*training_args.horseshoe_lr, "name": "horseshoe_theta_rate"}
         ]
 
         if self.optimizer_type == "default":
@@ -261,6 +296,16 @@ class HorseshoeModel:
         l.append('opacity')
         for i in range(self._scaling.shape[1]):
             l.append('scale_{}'.format(i))
+        for i in range(self._horseshoe.beta_mean.shape[1]):
+            l.append('horseshoe_beta_mean_{}'.format(i))
+        for i in range(self._horseshoe.beta_rho.shape[1]):
+            l.append('horseshoe_beta_rho_{}'.format(i))
+        for i in range(self._horseshoe.lambda_shape.shape[1]):
+            l.append('horseshoe_lambda_shape_{}'.format(i))
+        for i in range(self._horseshoe.lambda_rate.shape[1]):
+            l.append('horseshoe_lambda_rate_{}'.format(i))
+        l.append('horseshoe_theta_shape')
+        l.append('horseshoe_theta_rate')
         for i in range(self._rotation.shape[1]):
             l.append('rot_{}'.format(i))
         return l
@@ -274,12 +319,27 @@ class HorseshoeModel:
         f_rest = self._features_rest.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         opacities = self._opacity.detach().cpu().numpy()
         scale = self._scaling.detach().cpu().numpy()
+        # TODO: add horseshoe parameters
+        # horseshoe_prior_lambda_rate = self._horseshoe.prior_lambda_rate.detach().cpu().numpy()
+        horseshoe_beta_mean = self._horseshoe.beta_mean.detach().cpu().numpy()
+        horseshoe_beta_rho = self._horseshoe.beta_rho.detach().cpu().numpy()
+        horseshoe_lambda_shape = self._horseshoe.lambda_shape.detach().cpu().numpy()
+        horseshoe_lambda_rate = self._horseshoe.lambda_rate.detach().cpu().numpy()
+        # horseshoe_theta_shape = self._horseshoe.theta_shape.detach().cpu().numpy()
+        # horseshoe_theta_rate = self._horseshoe.theta_rate.detach().cpu().numpy()
+
+        horseshoe_theta_shape = np.full((xyz.shape[0], 1), self._horseshoe.theta_shape.item(), dtype=np.float32)
+        horseshoe_theta_rate = np.full((xyz.shape[0], 1), self._horseshoe.theta_rate.item(), dtype=np.float32)
+
         rotation = self._rotation.detach().cpu().numpy()
 
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
-        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
+        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale,
+                                    # horseshoe_prior_lambda_rate, 
+                                    horseshoe_beta_mean, horseshoe_beta_rho, horseshoe_lambda_shape, horseshoe_lambda_rate, horseshoe_theta_shape, horseshoe_theta_rate,
+                                    rotation), axis=1)
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
@@ -327,6 +387,52 @@ class HorseshoeModel:
         for idx, attr_name in enumerate(scale_names):
             scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
+        # TODO: add horseshoe parameters
+        # horseshoe_prior_lambda_rate_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("horseshoe_prior_lambda_rate_")]
+        # horseshoe_prior_lambda_rate_names = sorted(horseshoe_prior_lambda_rate_names, key = lambda x: int(x.split('_')[-1]))
+        # horseshoe_prior_lambda_rate = np.zeros((xyz.shape[0], len(horseshoe_prior_lambda_rate_names)))
+        # for idx, attr_name in enumerate(horseshoe_prior_lambda_rate_names):
+        #     horseshoe_prior_lambda_rate[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        horseshoe_beta_mean_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("horseshoe_beta_mean_")]
+        horseshoe_beta_mean_names = sorted(horseshoe_beta_mean_names, key = lambda x: int(x.split('_')[-1]))
+        horseshoe_beta_mean = np.zeros((xyz.shape[0], len(horseshoe_beta_mean_names)))
+        for idx, attr_name in enumerate(horseshoe_beta_mean_names):
+            horseshoe_beta_mean[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        horseshoe_beta_rho_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("horseshoe_beta_rho_")]
+        horseshoe_beta_rho_names = sorted(horseshoe_beta_rho_names, key = lambda x: int(x.split('_')[-1]))
+        horseshoe_beta_rho = np.zeros((xyz.shape[0], len(horseshoe_beta_rho_names)))
+        for idx, attr_name in enumerate(horseshoe_beta_rho_names):
+            horseshoe_beta_rho[:, idx] = np.asarray(plydata.elements[0][attr_name]) 
+        
+        horseshoe_lambda_shape_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("horseshoe_lambda_shape_")]
+        horseshoe_lambda_shape_names = sorted(horseshoe_lambda_shape_names, key = lambda x: int(x.split('_')[-1]))
+        horseshoe_lambda_shape = np.zeros((xyz.shape[0], len(horseshoe_lambda_shape_names)))
+        for idx, attr_name in enumerate(horseshoe_lambda_shape_names):
+            horseshoe_lambda_shape[:, idx] = np.asarray(plydata.elements[0][attr_name]) 
+
+        horseshoe_lambda_rate_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("horseshoe_lambda_rate_")]
+        horseshoe_lambda_rate_names = sorted(horseshoe_lambda_rate_names, key = lambda x: int(x.split('_')[-1]))
+        horseshoe_lambda_rate = np.zeros((xyz.shape[0], len(horseshoe_lambda_rate_names)))
+        for idx, attr_name in enumerate(horseshoe_lambda_rate_names):
+            horseshoe_lambda_rate[:, idx] = np.asarray(plydata.elements[0][attr_name])   
+
+        # horseshoe_theta_shape_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("horseshoe_theta_shape")]
+        # horseshoe_theta_shape_names = sorted(horseshoe_theta_shape_names, key = lambda x: int(x.split('_')[-1]))
+        # horseshoe_theta_shape = np.zeros((xyz.shape[0], len(horseshoe_theta_shape_names)))
+        # for idx, attr_name in enumerate(horseshoe_theta_shape_names):
+        #     horseshoe_theta_shape[:, idx] = np.asarray(plydata.elements[0][attr_name])  
+
+        # horseshoe_theta_rate_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("horseshoe_theta_rate")]
+        # horseshoe_theta_rate_names = sorted(horseshoe_theta_rate_names, key = lambda x: int(x.split('_')[-1]))
+        # horseshoe_theta_rate = np.zeros((xyz.shape[0], len(horseshoe_theta_rate_names)))
+        # for idx, attr_name in enumerate(horseshoe_theta_rate_names):
+        #     horseshoe_theta_rate[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        horseshoe_theta_shape = float(plydata.elements[0]["horseshoe_theta_shape"][0])
+        horseshoe_theta_rate = float(plydata.elements[0]["horseshoe_theta_rate"][0])
+            
         rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
         rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
         rots = np.zeros((xyz.shape[0], len(rot_names)))
@@ -338,20 +444,22 @@ class HorseshoeModel:
         self._features_rest = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
         self._opacity = nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True))
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
+        # TODO: add horseshoe parameters
+        self._horseshoe = Horseshoe(
+            self._scaling,
+            horseshoe_priors
+        ).cuda()
+        # self._horseshoe.prior_lambda_rate = nn.Parameter(torch.tensor(horseshoe_prior_lambda_rate, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.beta_mean = nn.Parameter(torch.tensor(horseshoe_beta_mean, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.beta_rho = nn.Parameter(torch.tensor(horseshoe_beta_rho, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.lambda_shape = nn.Parameter(torch.tensor(horseshoe_lambda_shape, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.lambda_rate = nn.Parameter(torch.tensor(horseshoe_lambda_rate, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.theta_shape = nn.Parameter(torch.tensor(horseshoe_theta_shape, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._horseshoe.theta_rate = nn.Parameter(torch.tensor(horseshoe_theta_rate, dtype=torch.float, device="cuda").requires_grad_(True))
+
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
 
         self.active_sh_degree = self.max_sh_degree
-
-        self._horseshoe = Horseshoe(
-            self._scaling,
-            {
-                "horseshoe_scale": 0.01,
-                "weight_cauchy_scale": 1.,
-                "global_cauchy_scale": 1.,
-                "beta_rho_scale": -4
-            }
-        ).cuda()
-        self._horseshoe()
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
@@ -371,6 +479,8 @@ class HorseshoeModel:
     def _prune_optimizer(self, mask):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
+            if group["name"] in ["horseshoe_theta_shape", "horseshoe_theta_rate"]: # global parameters do not need to be pruned
+                continue
             stored_state = self.optimizer.state.get(group['params'][0], None)
             if stored_state is not None:
                 stored_state["exp_avg"] = stored_state["exp_avg"][mask]
@@ -395,6 +505,16 @@ class HorseshoeModel:
         self._features_rest = optimizable_tensors["f_rest"]
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
+        self._horseshoe.scaling_matrix = self._scaling
+        # TODO: add horseshoe parameters
+        # self._horseshoe.prior_lambda_rate = optimizable_tensors["horseshoe_prior_lambda_rate"]
+        self._horseshoe.beta_mean = optimizable_tensors["horseshoe_beta_mean"]
+        self._horseshoe.beta_rho = optimizable_tensors["horseshoe_beta_rho"]
+        self._horseshoe.lambda_shape = optimizable_tensors["horseshoe_lambda_shape"]
+        self._horseshoe.lambda_rate = optimizable_tensors["horseshoe_lambda_rate"]
+        # self._horseshoe.theta_shape = optimizable_tensors["horseshoe_theta_shape"]
+        # self._horseshoe.theta_rate = optimizable_tensors["horseshoe_theta_rate"]
+        
         self._rotation = optimizable_tensors["rotation"]
 
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
@@ -406,6 +526,8 @@ class HorseshoeModel:
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
+            if group["name"] in ["horseshoe_theta_shape", "horseshoe_theta_rate"]: # global parameters do not need to be extended
+                continue
             assert len(group["params"]) == 1
             extension_tensor = tensors_dict[group["name"]]
             stored_state = self.optimizer.state.get(group['params'][0], None)
@@ -425,12 +547,24 @@ class HorseshoeModel:
 
         return optimizable_tensors
 
-    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_tmp_radii):
+    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling,
+                              new_horseshoe_beta_mean, new_horseshoe_beta_rho, new_horseshoe_lambda_shape, new_horseshoe_lambda_rate, 
+                            #   new_horseshoe_prior_lambda_rate, new_horseshoe_theta_shape, new_horseshoe_theta_rate,
+                              new_rotation, new_tmp_radii):
         d = {"xyz": new_xyz,
         "f_dc": new_features_dc,
         "f_rest": new_features_rest,
         "opacity": new_opacities,
         "scaling" : new_scaling,
+        # TODO: add horseshoe parameters
+        # "horseshoe_prior_lambda_rate": new_horseshoe_prior_lambda_rate,
+        "horseshoe_beta_mean": new_horseshoe_beta_mean,
+        "horseshoe_beta_rho": new_horseshoe_beta_rho,
+        "horseshoe_lambda_shape": new_horseshoe_lambda_shape,
+        "horseshoe_lambda_rate": new_horseshoe_lambda_rate,
+        # "horseshoe_theta_shape": new_horseshoe_theta_shape,
+        # "horseshoe_theta_rate": new_horseshoe_theta_rate,
+
         "rotation" : new_rotation}
 
         optimizable_tensors = self.cat_tensors_to_optimizer(d)
@@ -439,6 +573,15 @@ class HorseshoeModel:
         self._features_rest = optimizable_tensors["f_rest"]
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
+        self._horseshoe.scaling_matrix = self._scaling
+        # TODO: add horseshoe parameters
+        # self._horseshoe.prior_lambda_rate = optimizable_tensors["horseshoe_prior_lambda_rate"]
+        self._horseshoe.beta_mean = optimizable_tensors["horseshoe_beta_mean"]
+        self._horseshoe.beta_rho = optimizable_tensors["horseshoe_beta_rho"]
+        self._horseshoe.lambda_shape = optimizable_tensors["horseshoe_lambda_shape"]
+        self._horseshoe.lambda_rate = optimizable_tensors["horseshoe_lambda_rate"]
+        # self._horseshoe.theta_shape = optimizable_tensors["horseshoe_theta_shape"]
+        # self._horseshoe.theta_rate = optimizable_tensors["horseshoe_theta_rate"]
         self._rotation = optimizable_tensors["rotation"]
 
         self.tmp_radii = torch.cat((self.tmp_radii, new_tmp_radii))
@@ -463,13 +606,25 @@ class HorseshoeModel:
         rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N,1,1)
         new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask].repeat(N, 1)
         new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N,1) / (0.8*N))
+        # TODO: add horseshoe parameters
+        # new_horseshoe_prior_lambda_rate = self._horseshoe.prior_lambda_rate[selected_pts_mask].repeat(N,1)
+        new_horseshoe_beta_mean = self._horseshoe.beta_mean[selected_pts_mask].repeat(N,1)
+        new_horseshoe_beta_rho = self._horseshoe.beta_rho[selected_pts_mask].repeat(N,1)
+        new_horseshoe_lambda_shape = self._horseshoe.lambda_shape[selected_pts_mask].repeat(N,1)
+        new_horseshoe_lambda_rate = self._horseshoe.lambda_rate[selected_pts_mask].repeat(N,1)
+        # new_horseshoe_theta_shape = self._horseshoe.theta_shape[selected_pts_mask].repeat(N,1)
+        # new_horseshoe_theta_rate = self._horseshoe.theta_rate[selected_pts_mask].repeat(N,1)
+
         new_rotation = self._rotation[selected_pts_mask].repeat(N,1)
         new_features_dc = self._features_dc[selected_pts_mask].repeat(N,1,1)
         new_features_rest = self._features_rest[selected_pts_mask].repeat(N,1,1)
         new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
         new_tmp_radii = self.tmp_radii[selected_pts_mask].repeat(N)
 
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation, new_tmp_radii)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling,
+                                   new_horseshoe_beta_mean, new_horseshoe_beta_rho, new_horseshoe_lambda_shape, new_horseshoe_lambda_rate, 
+                                #    new_horseshoe_prior_lambda_rate, new_horseshoe_theta_shape, new_horseshoe_theta_rate,
+                                   new_rotation, new_tmp_radii)
 
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
         self.prune_points(prune_filter)
@@ -485,11 +640,23 @@ class HorseshoeModel:
         new_features_rest = self._features_rest[selected_pts_mask]
         new_opacities = self._opacity[selected_pts_mask]
         new_scaling = self._scaling[selected_pts_mask]
+        # TODO: add horseshoe parameters
+        # new_horseshoe_prior_lambda_rate = self._horseshoe.prior_lambda_rate[selected_pts_mask]
+        new_horseshoe_beta_mean = self._horseshoe.beta_mean[selected_pts_mask]
+        new_horseshoe_beta_rho = self._horseshoe.beta_rho[selected_pts_mask]
+        new_horseshoe_lambda_shape = self._horseshoe.lambda_shape[selected_pts_mask]
+        new_horseshoe_lambda_rate = self._horseshoe.lambda_rate[selected_pts_mask]
+        # new_horseshoe_theta_shape = self._horseshoe.theta_shape[selected_pts_mask]
+        # new_horseshoe_theta_rate = self._horseshoe.theta_rate[selected_pts_mask]
+
         new_rotation = self._rotation[selected_pts_mask]
 
         new_tmp_radii = self.tmp_radii[selected_pts_mask]
 
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_tmp_radii)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling,
+                                   new_horseshoe_beta_mean, new_horseshoe_beta_rho, new_horseshoe_lambda_shape, new_horseshoe_lambda_rate, 
+                                #    new_horseshoe_prior_lambda_rate, new_horseshoe_theta_shape, new_horseshoe_theta_rate,
+                                   new_rotation, new_tmp_radii)
 
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, radii):
         grads = self.xyz_gradient_accum / self.denom
