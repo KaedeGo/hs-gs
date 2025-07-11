@@ -1,0 +1,7 @@
+# ninja log v5
+0	10222	1750683976055640454	/home/fwu/Documents/inferProjects/3dgs-baselines/variational-3dgs/submodules/simple-knn/build/temp.linux-x86_64-cpython-38/simple_knn.o	a323b32ba8128f86
+0	21460	1750683987275670594	/home/fwu/Documents/inferProjects/3dgs-baselines/variational-3dgs/submodules/simple-knn/build/temp.linux-x86_64-cpython-38/ext.o	eb4f98f65b9de71c
+1	39856	1750684005651720954	/home/fwu/Documents/inferProjects/3dgs-baselines/variational-3dgs/submodules/simple-knn/build/temp.linux-x86_64-cpython-38/spatial.o	dd2891d8d9742fd2
+0	10175	1752154373096679081	/home/fwu/Documents/myProjects/hs-gs/submodules/simple-knn/build/temp.linux-x86_64-cpython-38/simple_knn.o	c32f2024a90257b2
+0	21783	1752154384688703385	/home/fwu/Documents/myProjects/hs-gs/submodules/simple-knn/build/temp.linux-x86_64-cpython-38/ext.o	c285793b182b6da6
+0	36797	1752154399676735240	/home/fwu/Documents/myProjects/hs-gs/submodules/simple-knn/build/temp.linux-x86_64-cpython-38/spatial.o	d30c6c735ec0219
