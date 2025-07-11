@@ -12,11 +12,9 @@
 import torch
 import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
-from scene.gaussian_model import GaussianModel
-from scene.horseshoe_model import HorseshoeModel
 from utils.sh_utils import eval_sh
 
-def render(viewpoint_camera, pc : HorseshoeModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, separate_sh = False, override_color = None, use_trained_exp=False):
+def render(viewpoint_camera, pc, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
     """
     Render the scene. 
     
@@ -48,8 +46,7 @@ def render(viewpoint_camera, pc : HorseshoeModel, pipe, bg_color : torch.Tensor,
         sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
-        debug=pipe.debug,
-        antialiasing=pipe.antialiasing
+        debug=pipe.debug
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -82,62 +79,36 @@ def render(viewpoint_camera, pc : HorseshoeModel, pipe, bg_color : torch.Tensor,
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
         else:
-            if separate_sh:
-                dc, shs = pc.get_features_dc, pc.get_features_rest
-            else:
-                shs = pc.get_features
+            shs = pc.get_features
     else:
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    if separate_sh:
-        rendered_image, radii, depth_image = rasterizer(
-            means3D = means3D,
-            means2D = means2D,
-            dc = dc,
-            shs = shs,
-            colors_precomp = colors_precomp,
-            opacities = opacity,
-            scales = scales,
-            rotations = rotations,
-            cov3D_precomp = cov3D_precomp)
-    else:
-        rendered_image, radii, depth_image = rasterizer(
-            means3D = means3D,
-            means2D = means2D,
-            shs = shs,
-            colors_precomp = colors_precomp,
-            opacities = opacity,
-            scales = scales,
-            rotations = rotations,
-            cov3D_precomp = cov3D_precomp)
-        
-    # Apply exposure to rendered image (training only)
-    if use_trained_exp:
-        exposure = pc.get_exposure_from_name(viewpoint_camera.image_name)
-        rendered_image = torch.matmul(rendered_image.permute(1, 2, 0), exposure[:3, :3]).permute(2, 0, 1) + exposure[:3, 3,   None, None]
+    rendered_image, radii, depth_image = rasterizer(
+        means3D = means3D,
+        means2D = means2D,
+        shs = shs,
+        colors_precomp = colors_precomp,
+        opacities = opacity,
+        scales = scales,
+        rotations = rotations,
+        cov3D_precomp = cov3D_precomp)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
-    rendered_image = rendered_image.clamp(0, 1)
-    out = {
-        "render": rendered_image,
-        "viewspace_points": screenspace_points,
-        "visibility_filter" : (radii > 0).nonzero(),
-        "radii": radii,
-        "depth" : depth_image
+    return {"render": rendered_image,
+            "viewspace_points": screenspace_points,
+            "visibility_filter" : radii > 0,
+            "radii": radii,
+            "depth" : depth_image, 
         }
-    
-    return out
 
 
-def render_hs(viewpoint_camera, pc : HorseshoeModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, separate_sh = False, override_color = None, use_trained_exp=False):
+def render_hs(viewpoint_camera, pc, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
     """
     Render the scene. 
     
     Background tensor (bg_color) must be on GPU!
-
-    Using in rendering process, sampling scaling from horseshoe distribution.
     """
  
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
@@ -163,8 +134,7 @@ def render_hs(viewpoint_camera, pc : HorseshoeModel, pipe, bg_color : torch.Tens
         sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
-        debug=pipe.debug,
-        antialiasing=pipe.antialiasing
+        debug=pipe.debug
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -178,12 +148,10 @@ def render_hs(viewpoint_camera, pc : HorseshoeModel, pipe, bg_color : torch.Tens
     scales = None
     rotations = None
     cov3D_precomp = None
-
     if pipe.compute_cov3D_python:
-        cov3D_precomp = pc.get_horseshoe_covariance(scaling_modifier, n_samples=32)
+        cov3D_precomp = pc.get_covariance(scaling_modifier)
     else:
-        # scales = pc.get_scaling
-        scales = pc.get_horseshoe_scaling(n_samples=32)
+        scales = pc.get_scaling
         rotations = pc.get_rotation
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
@@ -198,50 +166,26 @@ def render_hs(viewpoint_camera, pc : HorseshoeModel, pipe, bg_color : torch.Tens
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
         else:
-            if separate_sh:
-                dc, shs = pc.get_features_dc, pc.get_features_rest
-            else:
-                shs = pc.get_features
+            shs = pc.get_features
     else:
         colors_precomp = override_color
 
-    renders = []
-    for i in range(32):
-        # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-        if separate_sh:
-            rendered_image, radii, depth_image = rasterizer(
-                means3D = means3D,
-                means2D = means2D,
-                dc = dc,
-                shs = shs,
-                colors_precomp = colors_precomp,
-                opacities = opacity,
-                scales = scales[i],
-                rotations = rotations,
-                cov3D_precomp = cov3D_precomp[i] if cov3D_precomp is not None else None)
-        else:
-            rendered_image, radii, depth_image = rasterizer(
-                means3D = means3D,
-                means2D = means2D,
-                shs = shs,
-                colors_precomp = colors_precomp,
-                opacities = opacity,
-                scales = scales[i],
-                rotations = rotations,
-                cov3D_precomp = cov3D_precomp[i] if cov3D_precomp is not None else None)
-            
-        # Apply exposure to rendered image (training only)
-        if use_trained_exp:
-            exposure = pc.get_exposure_from_name(viewpoint_camera.image_name)
-            rendered_image = torch.matmul(rendered_image.permute(1, 2, 0), exposure[:3, :3]).permute(2, 0, 1) + exposure[:3, 3,   None, None]
-        # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
-        # They will be excluded from value updates used in the splitting criteria.
-        rendered_image = rendered_image.clamp(0, 1)
-        renders.append(rendered_image)
-    
-    renders = torch.stack(renders)
-    out = {
-        "render": renders,
+    # Rasterize visible Gaussians to image, obtain their radii (on screen). 
+    rendered_image, radii, depth_image = rasterizer(
+        means3D = means3D,
+        means2D = means2D,
+        shs = shs,
+        colors_precomp = colors_precomp,
+        opacities = opacity,
+        scales = scales,
+        rotations = rotations,
+        cov3D_precomp = cov3D_precomp)
+
+    # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
+    # They will be excluded from value updates used in the splitting criteria.
+    return {"render": rendered_image,
+            "viewspace_points": screenspace_points,
+            "visibility_filter" : radii > 0,
+            "radii": radii,
+            "depth" : depth_image, 
         }
-    
-    return out
