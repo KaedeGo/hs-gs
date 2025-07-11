@@ -232,7 +232,7 @@ def get_CFNeRF(root, device='cpu'):
     return rgbs, gts
 
 def get_GS(root, device='cpu'):
-    rgbs_path = sorted(glob.glob(os.path.join(root, f'renders/*.pt')))
+    rgbs_path = sorted(glob.glob(os.path.join(root, f'uncertainty_renders/*.pt')))
     gts_path = sorted(glob.glob(os.path.join(root, f'gt/*.png')))
     print(root, len(rgbs_path))
     rgbs = []

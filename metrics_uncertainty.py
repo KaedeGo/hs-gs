@@ -82,5 +82,5 @@ if __name__ == '__main__':
     results['ause_mae'] = df_mae['ause']
     print(results)
 
-    with open(args.experiment_path + "/results.json", 'w') as fp:
+    with open(args.experiment_path + "/uncertainty_results.json", 'w') as fp:
         json.dump(results, fp, indent=True)
