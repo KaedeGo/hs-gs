@@ -149,9 +149,9 @@ def render_hs(viewpoint_camera, pc, pipe, bg_color : torch.Tensor, scaling_modif
     rotations = None
     cov3D_precomp = None
     if pipe.compute_cov3D_python:
-        cov3D_precomp = pc.get_covariance(scaling_modifier)
+        cov3D_precomp = pc.get_hs_covariance(scaling_modifier)
     else:
-        scales = pc.get_scaling
+        scales = pc.get_hs_scaling()
         rotations = pc.get_rotation
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
@@ -188,4 +188,34 @@ def render_hs(viewpoint_camera, pc, pipe, bg_color : torch.Tensor, scaling_modif
             "visibility_filter" : radii > 0,
             "radii": radii,
             "depth" : depth_image, 
+        }
+
+def forward_k_times(viewpoint_camera, pc, pipe, bg_color, scaling_modifier = 1.0, override_color = None, k=10): 
+    rgbs = []
+    depths = []
+
+    for _ in range(k): 
+        out = render_hs(viewpoint_camera, pc, pipe, bg_color, scaling_modifier = 1.0, override_color = None)
+        rgb = out['render']
+        depth = out['depth']
+        depths.append(depth)
+        rgbs.append(rgb)
+
+    rgbs = torch.stack(rgbs, dim=0)
+    depths = torch.stack(depths, dim=0)
+    depth_mean = depths.mean(dim=0)
+    depth_var = depths.var(dim=0)
+
+    std = rgbs.std(dim=0)
+    var = rgbs.var(dim=0)
+
+    mean = rgbs.mean(dim=0)
+
+    return {'comp_rgb': mean,
+            'comp_rgbs': rgbs, 
+            'comp_var': var, 
+            'comp_std': std, 
+            'depths': depths, 
+            'depth_var': depth_var, 
+            'depth_mean': depth_mean, 
         }
