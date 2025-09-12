@@ -149,15 +149,9 @@ def render_hs(viewpoint_camera, pc, pipe, bg_color : torch.Tensor, scaling_modif
     rotations = None
     cov3D_precomp = None
     if pipe.compute_cov3D_python:
-<<<<<<< HEAD
         cov3D_precomp = pc.get_hs_covariance(scaling_modifier, n_samples=n_samples)
     else:
         scales = pc.get_hs_scaling(n_samples=n_samples)
-=======
-        cov3D_precomp = pc.get_hs_covariance(scaling_modifier)
-    else:
-        scales = pc.get_hs_scaling()
->>>>>>> refs/remotes/origin/main
         rotations = pc.get_rotation
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
@@ -196,20 +190,12 @@ def render_hs(viewpoint_camera, pc, pipe, bg_color : torch.Tensor, scaling_modif
             "depth" : depth_image, 
         }
 
-<<<<<<< HEAD
 def forward_k_times(viewpoint_camera, pc, pipe, bg_color, scaling_modifier = 1.0, override_color = None, k=10, n_samples=10): 
-=======
-def forward_k_times(viewpoint_camera, pc, pipe, bg_color, scaling_modifier = 1.0, override_color = None, k=10): 
->>>>>>> refs/remotes/origin/main
     rgbs = []
     depths = []
 
     for _ in range(k): 
-<<<<<<< HEAD
         out = render_hs(viewpoint_camera, pc, pipe, bg_color, scaling_modifier = 1.0, override_color = None, n_samples=n_samples)
-=======
-        out = render_hs(viewpoint_camera, pc, pipe, bg_color, scaling_modifier = 1.0, override_color = None)
->>>>>>> refs/remotes/origin/main
         rgb = out['render']
         depth = out['depth']
         depths.append(depth)

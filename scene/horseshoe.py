@@ -239,10 +239,6 @@ class Horseshoe(nn.Module):
         for param in self.parameters():
             param.data = torch.where(
                 torch.isnan(param.data),
-<<<<<<< HEAD
                 torch.full_like(param.data, 0.5),
-=======
-                torch.full_like(param.data, 1),
->>>>>>> refs/remotes/origin/main
                 param.data
             )
