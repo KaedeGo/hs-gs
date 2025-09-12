@@ -28,7 +28,7 @@ horseshoe_priors = {
     "horseshoe_scale": 0.01,
     "weight_cauchy_scale": 1.,
     "global_cauchy_scale": 1.,
-    "beta_rho_scale": -0.5, # [-2, -1.5, -1, -0.5, 0.1, 0]
+    "beta_rho_scale": -6 # TODO: Tune this from [-6, -5, -4, -3, -2, -1, -0.5]
     }
 
 
@@ -52,7 +52,7 @@ class HorseshoeModel:
         self.rotation_activation = torch.nn.functional.normalize
 
 
-    def __init__(self, sh_degree, optimizer_type="default"):
+    def __init__(self, sh_degree, optimizer_type="default", beta_rho_scale=-6.0):
         self.active_sh_degree = 0
         self.optimizer_type = optimizer_type
         self.max_sh_degree = sh_degree  
@@ -75,6 +75,8 @@ class HorseshoeModel:
         self.percent_dense = 0
         self.spatial_lr_scale = 0
         self.setup_functions()
+
+        horseshoe_priors["beta_rho_scale"] = beta_rho_scale
 
     def capture(self):
         return (
@@ -141,9 +143,8 @@ class HorseshoeModel:
     def get_scaling(self):
         return self.scaling_activation(self._scaling)
     
-    # TODO: sample scaling from horseshoe distribution
-    def get_horseshoe_scaling(self, n_samples=1):
-        return  self.scaling_activation(self._horseshoe.sample(n_samples))
+    def get_hs_scaling(self, n_samples=10): # Use the horseshoe distribution to sample scaling # TODO if the result is not good, use the scaling directly
+        return self.scaling_activation(self._horseshoe.sample(n_samples))
     
     @property
     def get_rotation(self):
@@ -174,31 +175,28 @@ class HorseshoeModel:
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
 
-    def get_horseshoe_covariance(self, scaling_modifier = 1, n_samples=1):
-        scaling = self.get_horseshoe_scaling(n_samples)
-        covariance = [self.covariance_activation(s, scaling_modifier, self._rotation) for s in scaling]
-        return torch.stack(covariance, dim=0)
+    def get_hs_covariance(self, scaling_modifier = 1, n_samples=10):
+        return self.covariance_activation(self.get_hs_scaling(n_samples=n_samples), scaling_modifier, self._rotation)
     
     def oneupSHdegree(self):
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
 
-    def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scale : float):
-        self.spatial_lr_scale = spatial_lr_scale
+    def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scalar : float):
+        self.spatial_lr_scalar = spatial_lr_scalar
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
         features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
         features[:, :3, 0 ] = fused_color
         features[:, 3:, 1:] = 0.0
-
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
 
         dist2 = torch.clamp_min(distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()), 0.0000001)
-        scales = torch.log(torch.sqrt(dist2)*0.1)[...,None].repeat(1, 3)
+        scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
 
-        opacities = inverse_sigmoid(0.5 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
+        opacities = self.inverse_opacity_activation(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
 
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
         self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))

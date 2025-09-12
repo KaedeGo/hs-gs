@@ -12,7 +12,7 @@ import os
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim
-from gaussian_renderer import render, network_gui
+from gaussian_renderer import render, render_hs
 import sys
 from scene import Scene, HorseshoeModel
 from utils.general_utils import safe_state
@@ -23,6 +23,7 @@ from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 import csv
 from lpipsPyTorch import lpips
+import torchvision
 
 if False: 
     from torch.utils.tensorboard import SummaryWriter
@@ -30,10 +31,11 @@ if False:
 else: 
     TENSORBOARD_FOUND = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, 
+                kl_weight, beta_rho_scale, sample_n):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    gaussians = HorseshoeModel(dataset.sh_degree, opt.optimizer_type)
+    gaussians = HorseshoeModel(dataset.sh_degree, opt.optimizer_type, beta_rho_scale)
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
 
@@ -53,22 +55,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     first_iter += 1
 
     for iteration in range(first_iter, opt.iterations + 1):
-        # if network_gui.conn == None:
-        #     network_gui.try_connect()
-        # while network_gui.conn != None:
-        #     try:
-        #         net_image_bytes = None
-        #         custom_cam, do_training, pipe.convert_SHs_python, pipe.compute_cov3D_python, keep_alive, scaling_modifer = network_gui.receive()
-        #         if custom_cam != None:
-        #             net_image = render(custom_cam, gaussians, pipe, background, scaling_modifier=scaling_modifer, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE)["render"]
-        #             net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy())
-        #         network_gui.send(net_image_bytes, dataset.source_path)
-        #         if do_training and ((iteration < int(opt.iterations)) or not keep_alive):
-        #             break
-        #     except Exception as e:
-        #         network_gui.conn = None
-
         iter_start.record()
+
+        # Reset nan parameters
+        gaussians._horseshoe.reset_na()
+
+        gaussians.update_learning_rate(iteration)
 
         # Pick a random Camera
         if not viewpoint_stack:
@@ -81,7 +73,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
-        render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
+        render_pkg = render_hs(viewpoint_cam, gaussians, pipe, bg, n_samples=sample_n) # TODO render_hs or render
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
         # Loss
@@ -89,9 +81,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
 
-        loss += gaussians._horseshoe() * 0.000001
-
-        gaussians.update_learning_rate(iteration)
+        loss += gaussians._horseshoe.kl_loss().mean() * kl_weight # TODO: tune this from [1E-9, 1E-8, 1E-7 ...]
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
@@ -113,7 +103,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.close()
 
             # Log and save
-            training_report(dataset, tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(dataset, tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render_hs, (pipe, background), sample_n)
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -162,7 +152,7 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(dataset, tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
+def training_report(dataset, tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, sample_n):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
@@ -179,7 +169,7 @@ def training_report(dataset, tb_writer, iteration, Ll1, loss, l1_loss, elapsed, 
                 l1_test = 0.0
                 psnr_test = 0.0
                 for idx, viewpoint in enumerate(config['cameras']):
-                    image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
+                    image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs, n_samples=sample_n)["render"], 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
                     if tb_writer and (idx < 5):
                         tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
@@ -199,6 +189,95 @@ def training_report(dataset, tb_writer, iteration, Ll1, loss, l1_loss, elapsed, 
             tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
             tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
+        if iteration == testing_iterations[-1]: 
+            render_set(dataset, scene, renderArgs[0], sample_n)
+
+
+from utils.image_utils import psnr, nll_kernel_density, ause_br
+from gaussian_renderer import forward_k_times
+from os import makedirs
+
+
+def render_set(dataset, scene, pipeline, sample_n):
+    gaussians, views = scene.gaussians, scene.getTestCameras()
+
+    bg_color = [0, 0, 0]
+    background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+
+    psnr_all, ssim_all, lpips_all, ause_mae_all, mean_nll_all, depth_ause_mae_all = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    eval_depth = True if dataset.dataset_name == "LF" else False
+
+    scene_name = scene.model_path.split("/")[-1]
+
+    render_path = f"{scene.model_path}/test/ours_7000/renders"
+    gts_path = f"{scene.model_path}/test/ours_7000/gt"
+    unc_path = f"{scene.model_path}/test/ours_7000/unc"
+
+    makedirs(render_path, exist_ok=True)
+    makedirs(gts_path, exist_ok=True)
+    makedirs(unc_path, exist_ok=True)
+
+    for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
+
+        gt = view.original_image[0:3, :, :]
+        out = forward_k_times(view, gaussians, pipeline, background, n_samples=sample_n)
+        mean = out['comp_rgb'].detach()
+        rgbs = out['comp_rgbs'].detach()
+        std = out['comp_std'].detach()
+        depths = out['depths'].detach()
+
+        mae = ((mean - gt)).abs()
+
+        ause_mae, ause_err_mae, ause_err_by_var_mae = ause_br(std.reshape(-1), mae.reshape(-1), err_type='mae')
+        mean_nll = nll_kernel_density(rgbs.permute(1,2,3,0), std, gt)
+
+        psnr_all += psnr(mean, gt).mean().item()
+        ssim_all += ssim(mean, gt).mean().item()
+        lpips_all += lpips(mean, gt, net_type="vgg").mean().item()
+
+        ause_mae_all += ause_mae.item()
+        mean_nll_all += mean_nll.item()
+
+        if eval_depth: 
+            depths = depths * scene.depth_scale
+
+            depth = depths.mean(dim=0)
+            depth_std = depths.std(dim=0)
+            depth_gt = view.depth
+
+            depth_mae = ((depth - depth_gt)).abs()
+            depth_ause_mae, depth_ause_err_mae, depth_ause_err_by_var_mae = ause_br(depth_std.reshape(-1), depth_mae.reshape(-1), err_type='mae')
+            depth_ause_mae_all += depth_ause_mae
+
+
+        unc_vis_multiply = 10
+        torchvision.utils.save_image(mean, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
+        torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+        torchvision.utils.save_image(unc_vis_multiply*std, os.path.join(unc_path, '{0:05d}'.format(idx) + ".png"))
+
+
+    psnr_all /= len(views)
+    ause_mae_all /= len(views)
+    mean_nll_all /= len(views)
+    ssim_all /= len(views)
+    lpips_all /= len(views)
+
+    depth_ause_mae_all /= len(views)
+
+    csv_dir = os.path.dirname(os.path.dirname(scene.model_path.rstrip("/")))
+    csv_file = f"{csv_dir}/eval_results_{dataset.dataset_name}.csv"
+    with open(csv_file, mode='a', newline='') as file:
+        writer = csv.writer(file)
+
+        if eval_depth: 
+            results = f"\nEvaluation Results: PSNR {psnr_all} SSIM {ssim_all} LPIPS {lpips_all} AUSE {ause_mae_all} NLL {mean_nll_all} Depth AUSE {depth_ause_mae_all}"
+            print(results)
+            writer.writerow([dataset.dataset_name, scene_name, psnr_all, ssim_all, lpips_all, ause_mae_all, mean_nll_all, depth_ause_mae_all])
+        else: 
+            results = f"\nEvaluation Results: PSNR {psnr_all} SSIM {ssim_all} LPIPS {lpips_all} AUSE {ause_mae_all} NLL {mean_nll_all}"
+            print(results)
+            writer.writerow([dataset.dataset_name, scene_name, psnr_all, ssim_all, lpips_all, ause_mae_all, mean_nll_all])
+
 
 if __name__ == "__main__":
     # Set up command line argument parser
@@ -206,16 +285,16 @@ if __name__ == "__main__":
     lp = ModelParams(parser)
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
-    # parser.add_argument('--ip', type=str, default="127.0.0.1")
-    # parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[3_000, 7_000, 30_000])
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[3_000, 7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument('--disable_viewer', action='store_true', default=True)
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--kl_weight", type=float, default=1E-4)
+    parser.add_argument("--beta_rho_scale", type=float, default=1.0)
+    parser.add_argument("--sample_n", type=int, default=1)
     args = parser.parse_args(sys.argv[1:])
 
     args.test_iterations.append(args.iterations)
@@ -226,11 +305,10 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    # Start GUI server, configure and run training
-    # if not args.disable_viewer:
-    #     network_gui.init(args.ip, args.port)
+    # Configure and run training
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from,
+                args.kl_weight, args.beta_rho_scale, args.sample_n)
 
     # All done
     print("\nTraining complete.")
