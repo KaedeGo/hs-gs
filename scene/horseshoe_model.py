@@ -143,8 +143,13 @@ class HorseshoeModel:
     def get_scaling(self):
         return self.scaling_activation(self._scaling)
     
+<<<<<<< HEAD
     def get_hs_scaling(self, n_samples=10): # Use the horseshoe distribution to sample scaling # TODO if the result is not good, use the scaling directly
         return self.scaling_activation(self._horseshoe.sample(n_samples))
+=======
+    def get_hs_scaling(self): # Use the horseshoe distribution to sample scaling # TODO if the result is not good, use the scaling directly
+        return self.scaling_activation(self._horseshoe.sample())
+>>>>>>> refs/remotes/origin/main
     
     @property
     def get_rotation(self):
@@ -175,8 +180,15 @@ class HorseshoeModel:
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
 
+<<<<<<< HEAD
     def get_hs_covariance(self, scaling_modifier = 1, n_samples=10):
         return self.covariance_activation(self.get_hs_scaling(n_samples=n_samples), scaling_modifier, self._rotation)
+=======
+    def get_hs_covariance(self, scaling_modifier = 1):
+        scaling = self.get_hs_scaling()
+        covariance = [self.covariance_activation(s, scaling_modifier, self._rotation) for s in scaling]
+        return torch.stack(covariance, dim=0)
+>>>>>>> refs/remotes/origin/main
     
     def oneupSHdegree(self):
         if self.active_sh_degree < self.max_sh_degree:

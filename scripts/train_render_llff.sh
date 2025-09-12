@@ -8,7 +8,11 @@
 export CUDA_VISIBLE_DEVICES=7
 NAME=hs_p6_E4
 EXPERIMENT=llff
+<<<<<<< HEAD
 DATA_DIR="/disk1/fwu/3DGS/nerf_llff_data"
+=======
+DATA_DIR="/data1/fwu/3DGS/nerf_llff_data"
+>>>>>>> refs/remotes/origin/main
 SCENES="fern flower fortress horns leaves orchids room trex"
 # SCENES="fern"
 # train process
