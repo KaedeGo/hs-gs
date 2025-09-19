@@ -13,6 +13,7 @@ import torch
 import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from utils.sh_utils import eval_sh
+from scene import HorseshoeModel
 
 def render(viewpoint_camera, pc, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
     """

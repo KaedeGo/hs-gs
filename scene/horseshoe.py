@@ -195,7 +195,8 @@ class Horseshoe(nn.Module):
         # E_q[N(beta)]
         log_gaussian = exp_log_gaussian(self.beta.mean, self.beta.std_dev)
 
-        return log_gaussian + log_inv_gammas
+        return log_gaussian + log_inv_gammas # horseshoe prior
+        # return log_gaussian # gaussian prior
 
     def log_variational_posterior(self):
         """
@@ -206,7 +207,8 @@ class Horseshoe(nn.Module):
         Tau and v follow log-Normal distributions. The entropy of a log normal
         is the entropy of the normal distribution + the mean.
         """
-        entropy = self.beta.entropy() + self.lambda_.entropy() + self.theta.entropy()
+        entropy = self.beta.entropy() + self.lambda_.entropy() + self.theta.entropy() # horseshoe prior
+        # entropy = self.beta.entropy() # gaussian prior
 
         return -entropy
 
@@ -222,12 +224,13 @@ class Horseshoe(nn.Module):
 
         # TODO calculate the mean of sampled log_lambda and log_theta
 
-        scaling = self.scaling_matrix * log_lambda * log_theta
+        scaling = self.scaling_matrix * log_lambda * log_theta # horseshoe sample
 
-        # sd = torch.nn.functional.softplus(self.beta_rho)
-        # eps = torch.distributions.Normal(0, sd * log_lambda * log_theta).rsample(sample_shape=(n_samples, ))
+        # sd = torch.nn.functional.softplus(self.beta_rho) # gaussian sample
+        # eps = torch.distributions.Normal(0, sd).rsample(sample_shape=(n_samples, )).mean(0)
         # scaling = self.scaling_matrix + eps
-        # scaling_sample = torch.distributions.Normal(self.scaling_matrix, sd * log_lambda * log_theta).rsample(sample_shape=(n_samples, ))
+
+        # scaling_sample = torch.distributions.Normal(self.scaling_matrix, sd).rsample(sample_shape=(n_samples, ))
         return scaling # shape: (N, 3)
 
     def get_device(self):
