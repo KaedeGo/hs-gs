@@ -126,7 +126,7 @@ trexSeq1Inplace = partial(VNSeqMInplace, N=15, M=1, num_init_views=5, interval_e
 schema_dict: Dict[str, BaseSchema] = {'all': All, "debug": V20Seq1Debug,
                                       "v20seq1_inplace": V20Seq1Inplace, "v10seq1_inplace": V10Seq1Inplace,
                                       "v20seq4_inplace": V20Seq4Inplace,
-                                      "fernseq1_inplace": fernSeq1Inplace, "flowerseq1_inplace": flowerSeq1Inplace, "fortressseq1_inplace": fortressSeq1Inplace, "hornssseq1_inplace": hornsSeq1Inplace, "leavesseq1_inplace": leavesSeq1Inplace, "orchidsseq1_inplace": orchidsSeq1Inplace, "roomseq1_inplace": roomSeq1Inplace, "trexseq1_inplace": trexSeq1Inplace,
+                                      "fernseq1_inplace": fernSeq1Inplace, "flowerseq1_inplace": flowerSeq1Inplace, "fortressseq1_inplace": fortressSeq1Inplace, "hornsseq1_inplace": hornsSeq1Inplace, "leavesseq1_inplace": leavesSeq1Inplace, "orchidsseq1_inplace": orchidsSeq1Inplace, "roomseq1_inplace": roomSeq1Inplace, "trexseq1_inplace": trexSeq1Inplace,
                                       }
 
 override_test_idxs_dict: Dict[str, List[int]] = {"basket": list(range(42, 50,2)), "africa": list(range(6, 14, 2)),

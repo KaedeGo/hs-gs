@@ -58,14 +58,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         iter_start.record()
         num_views = schema.num_views_to_add(iteration)
         if num_views > 0:
-            
             # For sectioned training
             candidate_views_filter = getattr(schema, "candidate_views_filter")[iteration] if hasattr(schema, "candidate_views_filter") else None
             scene.candidate_views_filter = candidate_views_filter
             
             # Because selection is time consumeing
-            selected_views = active_method.nbvs(gaussians, scene, num_views, pipe, background, exit_func=csm.should_exit)
-
+            selected_views = active_method.nbvs(gaussians, scene, pipe, background)
             print(f"ITER {iteration}: selected views: {selected_views}")
             scene.train_idxs.extend(selected_views)
             print(f"ITER {iteration}: training views after selection: {scene.train_idxs}")
@@ -237,6 +235,10 @@ if __name__ == "__main__":
     parser.add_argument("--kl_weight", type=float, default=1E-4)
     parser.add_argument("--beta_rho_scale", type=float, default=1.0)
     parser.add_argument("--sample_n", type=int, default=1)
+    parser.add_argument("--method", type=str, default="HS")
+    parser.add_argument("--schema", type=str, default="all")
+    parser.add_argument("--seed", type=int, default=0)
+
     args = parser.parse_args(sys.argv[1:])
 
     args.test_iterations.append(args.iterations)
@@ -249,8 +251,7 @@ if __name__ == "__main__":
 
     # Configure and run training
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from,
-                args.kl_weight, args.beta_rho_scale, args.sample_n)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args)
 
     # All done
     print("\nTraining complete.")

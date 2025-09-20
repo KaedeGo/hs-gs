@@ -70,6 +70,9 @@ class Scene:
             with open(os.path.join(self.model_path, "cameras.json"), 'w') as file:
                 json.dump(json_cams, file)
 
+        num_views = len(scene_info.train_cameras)
+        self.all_train_set = set(range(num_views))
+        self.train_idxs = list(range(num_views))
         if shuffle:
             random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
             random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
@@ -90,6 +93,8 @@ class Scene:
         else:
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
 
+        self.candidate_views_filter = None
+
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
@@ -99,3 +104,16 @@ class Scene:
 
     def getTestCameras(self, scale=1.0):
         return self.test_cameras[scale]
+
+    def get_candidate_set(self):
+        # Get candidate set 
+        # Ensure resutls are always the same
+        candidate_set = sorted(list(self.all_train_set - set(self.train_idxs)))
+        if self.candidate_views_filter is not None:
+            candidate_set = list(filter(self.candidate_views_filter, candidate_set))
+        return candidate_set
+
+    def getCandidateCameras(self, scale=1.0):
+        candidate_set = list(self.get_candidate_set())
+        filted_train_camers = [self.train_cameras[scale][i] for i in candidate_set]
+        return filted_train_camers

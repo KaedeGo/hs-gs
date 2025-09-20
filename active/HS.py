@@ -11,7 +11,7 @@ from utils.image_utils import ause_br
 
 class HSSelector(torch.nn.Module):
 
-    def __init__(self) -> None:
+    def __init__(self, args) -> None:
         super().__init__()
     
     def nbvs(self, gaussians, scene: Scene, pipe, background) -> List[int]:
@@ -36,7 +36,7 @@ class HSSelector(torch.nn.Module):
 
         for idx, cam in enumerate(tqdm(candidate_cameras, desc="Calculating uncertainty on candidate views")):
 
-            out = forward_k_times(cam, gaussians, pipe, background, sample_n=2)
+            out = forward_k_times(cam, gaussians, pipe, background, n_samples=2)
             gt = cam.original_image[0:3, :, :]
             mean = out['comp_rgb'].detach()
             std = out['comp_std'].detach()
