@@ -216,21 +216,16 @@ class Horseshoe(nn.Module):
         return self.log_variational_posterior() - self.log_prior()
             
     
-    def sample(self, n_samples=10): # TODO: change n_samples from [1, 2, 4, 8, 16, 32 ...]
+    def sample(self, n_samples=10): 
         self.lambda_ = InverseGamma(self.lambda_shape, self.lambda_rate)
         self.theta = InverseGamma(self.theta_shape, self.theta_rate)
         log_lambda = self.lambda_.rsample(sample_shape=(n_samples, )).clamp(min=1e-4, max=1).mean(0)
         log_theta = self.theta.rsample(sample_shape=(n_samples, )).clamp(min=1e-4, max=1).mean(0)
-
-        # TODO calculate the mean of sampled log_lambda and log_theta
-
         scaling = self.scaling_matrix * log_lambda * log_theta # horseshoe sample
 
         # sd = torch.nn.functional.softplus(self.beta_rho) # gaussian sample
         # eps = torch.distributions.Normal(0, sd).rsample(sample_shape=(n_samples, )).mean(0)
         # scaling = self.scaling_matrix + eps
-
-        # scaling_sample = torch.distributions.Normal(self.scaling_matrix, sd).rsample(sample_shape=(n_samples, ))
         return scaling # shape: (N, 3)
 
     def get_device(self):

@@ -23,8 +23,6 @@ else:
     TENSORBOARD_FOUND = False
 from utils.cluster_manager import ClusterStateManager
 
-# csm = ClusterStateManager()
-
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, args):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
@@ -68,11 +66,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             scene.train_idxs.extend(selected_views)
             print(f"ITER {iteration}: training views after selection: {scene.train_idxs}")
 
-            # gaussians.optimizer.zero_grad(set_to_none = True)
-
-            # first_iter, _ = load_checkpoint(init_ckpt_path, gaussians, scene, opt, ignore_train_idxs=True)
-            # base_iter = iteration - 1
-
         # Reset nan parameters
         gaussians._horseshoe.reset_na()
 
@@ -89,7 +82,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
-        render_pkg = render_hs(viewpoint_cam, gaussians, pipe, bg, n_samples=args.sample_n) # TODO render_hs or render
+        render_pkg = render_hs(viewpoint_cam, gaussians, pipe, bg, n_samples=args.sample_n)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
         # Loss
@@ -97,7 +90,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
 
-        loss += gaussians._horseshoe.kl_loss().mean() * args.kl_weight # TODO: tune this from [1E-9, 1E-8, 1E-7 ...]
+        loss += gaussians._horseshoe.kl_loss().mean() * args.kl_weight
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:

@@ -29,7 +29,6 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(gts_path, exist_ok=True)
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-        # rendering = render(view, gaussians, pipeline, background)["render"]
         rendering = forward_k_times(view, gaussians, pipeline, background, n_samples=2)["comp_rgb"]
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
@@ -63,5 +62,4 @@ if __name__ == "__main__":
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
-
     render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test)

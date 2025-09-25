@@ -56,7 +56,7 @@ def render_set(dataset, name, iteration, views, gaussians, pipeline, background,
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         gt = view.original_image[0:3, :, :]
-        out = forward_k_times(view, gaussians, pipeline, background, k=10) # TODO: choose k from [1, 2, 4, 8, 10, ...]
+        out = forward_k_times(view, gaussians, pipeline, background, k=10)
         rgbs = out['comp_rgbs'].detach()
         mean = out['comp_rgb'].detach()
         std = out['comp_std'].detach()
@@ -106,7 +106,6 @@ def render_set(dataset, name, iteration, views, gaussians, pipeline, background,
 
     depth_ause_mae_all /= len(views)
 
-    # csv_file = f"output/eval_results_{dataset.dataset_name}.csv"
     csv_file = f"{dataset_path}/eval_results.csv"
     with open(csv_file, mode='a', newline='') as file:
         writer = csv.writer(file)
@@ -151,8 +150,3 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test)
-
-    # python render_uncertainty.py -m "output/best/LF/africa" --skip_train
-    # python render_uncertainty.py -m "output/best/LF/basket" --skip_train
-    # python render_uncertainty.py -m "output/best/LF/statue" --skip_train
-    # python render_uncertainty.py -m "output/best/LF/torch" --skip_train

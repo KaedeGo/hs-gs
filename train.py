@@ -73,7 +73,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
-        render_pkg = render_hs(viewpoint_cam, gaussians, pipe, bg, n_samples=sample_n) # TODO render_hs or render
+        render_pkg = render_hs(viewpoint_cam, gaussians, pipe, bg, n_samples=sample_n)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
         # Loss
@@ -81,7 +81,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
 
-        loss += gaussians._horseshoe.kl_loss().mean() * kl_weight # TODO: tune this from [1E-9, 1E-8, 1E-7 ...]
+        loss += gaussians._horseshoe.kl_loss().mean() * kl_weight
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:

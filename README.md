@@ -1,39 +1,76 @@
-### 1.Dataset path
+# Horseshoe Splatting: Handling Structural Sparsity for Uncertainty-Aware Gaussian-Splatting Radiance Field Rendering
+
+This repository contains the official open-source implementation of the paper "Horseshoe Splatting: Handling Structural Sparsity for Uncertainty-Aware Gaussian-Splatting Radiance Field Rendering". We introduce Horseshoe Splatting, a Bayesian extension of 3D Gaussian Splatting (3DGS) that jointly addresses structured sparsity in per-splat covariances and delivers calibrated uncertainty.
+
+## Requirements
+
+**Hardware Requirements**
+
+CUDA-ready GPU with Compute Capability 7.0+
+
+**Software Requirements**
+
+Conda (recommended for easy setup)
+
+C++ Compiler for PyTorch extensions
+
+CUDA SDK 11 for PyTorch extensions
+
+C++ Compiler and CUDA SDK must be compatible
+
+## Usage
+
+### Cloning the Repository
+
+Please clone with submodules (The repository will be public after the paper is accepted)
+```shell
+# SSH
+git clone xxx --recursive
 ```
-/home/fwu/Datasets/3DGS  # root path
-/home/fwu/Datasets/3DGS/360_v2 # path for Mip-Nerf360 dataset(bicycle  bonsai  counter  flowers  garden  kitchen  room  stump  treehill)
-/home/fwu/Datasets/3DGS/tandt_db/tandt # path for Tanks&Temple dataset(train  truck)
-/home/fwu/Datasets/3DGS/tandt_db/db # path for Deep Blending dataset(drjohnson  playroom)
-/home/fwu/Datasets/3DGS/nerf_synthetic # path for Synthetic NeRF(chair  drums  ficus  hotdog  lego  materials  mic ship)
-/home/fwu/Datasets/3DGS/OMMO # path for OMMO(01 03 05 06 10 13 14 15)
+or
+```shell
+# HTTPS
+git clone xxx --recursive
 ```
 
-### 2. environment on CU12.4
+### Setup
+
+We provide conda environment file to creat experiment environment: 
+```shell
+conda env create --file environment.yml
+conda activate hs_splatting
 ```
-conda env create --file environment_cu12.4.yml
-conda activate gs_cu12
-```
+We test our code on ubuntu system, please refer to original 3DGS repo about the potential error building the environment or running on windows. 
 
-### 3.run initial GS
-```
-python train.py -s <path to COLMAP or NeRF Synthetic dataset> --eval # Train with train/test split
+### Preparing Dataset
 
-python train.py -s /home/fwu/Datasets/3DGS/tandt_db/db/playroom -m output/playroom --eval --disable_viewer #example
+The LF dataset and LLFF dataset files are provided here: [LF dataset](https://drive.google.com/file/d/1RrfrMN5wSaishYJu5vYiTy6gUPZfLaDM/view?usp=sharing), [LLFF dataset](https://drive.google.com/file/d/1kDclWpEpUPm9Nw0tGoQTLWz3L4g5Hu2L/view?usp=sharing). 
 
-python render.py -m <path to trained model> # Generate renderings
+Please unzip and put them under the a dataset folder: 
 
-python render.py -m output/playroom/ #example
-
-python metrics.py -m <path to trained model> # Compute error metrics on renderings
-
-python metrics.py -m output/playroom/ # example
-  SSIM :    0.9026289
-  PSNR :   29.4206161
-  LPIPS:    0.2388636
+```bash
+├──dataset
+│   │  
+│   ├──── LF
+│   └──── nerf_llff_data
 ```
 
-### webGL viewer
+### Running
+
+To train and evaluate the image quality and the image/depth uncertainty on LF dataset: 
+
+```shell
+sh scripts/train_render_lf.sh
 ```
-https://github.com/antimatter15/splat 
-download the .ply file and cameraa.json from output directory and drag it to website
+
+To train and evaluate the image quality and image uncertainty quality on LLFF dataset: 
+
+```shell
+sh scripts/train_render_llff.sh
+```
+
+To perform the active training on LLFF dataset: 
+
+```shell
+sh scripts/active_llff.sh
 ```
