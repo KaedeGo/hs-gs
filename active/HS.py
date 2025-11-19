@@ -30,25 +30,23 @@ class HSSelector(torch.nn.Module):
     
     def select_single_view(self, candidate_cameras, candidate_views, gaussians, pipe, background, num_views=1):
         """
-        A memory effcient way when doing single view selection
+        Real-world version: Selects views by maximizing the integrated predictive uncertainty. Does not use ground truth.
         """
-        ause_scores = torch.zeros(len(candidate_cameras))
+        uncertainty_scores = torch.zeros(len(candidate_cameras))
 
         for idx, cam in enumerate(tqdm(candidate_cameras, desc="Calculating uncertainty on candidate views")):
 
-            out = forward_k_times(cam, gaussians, pipe, background, n_samples=2)
-            gt = cam.original_image[0:3, :, :]
-            mean = out['comp_rgb'].detach()
+            out = forward_k_times(cam, gaussians, pipe, background, n_samples=10) # 建议增加 n_samples 以获得更稳定的不确定性估计
+            
             std = out['comp_std'].detach()
-            mae = ((mean - gt)).abs()
 
-            ause_mae, ause_err_mae, ause_err_by_var_mae = ause_br(std.reshape(-1), mae.reshape(-1), err_type='mae')
-
-            ause_scores[idx] = ause_mae
+            score = torch.sum(std**2) 
+            
+            uncertainty_scores[idx] = score
 
         
-        print(f"ause_scores: {ause_scores.tolist()}")
+        print(f"Uncertainty scores: {uncertainty_scores.tolist()}")
 
-        _, indices = torch.sort(ause_scores, descending=True)
+        _, indices = torch.sort(uncertainty_scores, descending=True)
         selected_idxs = [candidate_views[i] for i in indices[:num_views].tolist()]
         return selected_idxs
