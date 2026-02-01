@@ -25,12 +25,12 @@ C++ Compiler and CUDA SDK must be compatible
 Please clone with submodules (The repository will be public after the paper is accepted)
 ```shell
 # SSH
-git clone xxx --recursive
+git clone git@github.com:KaedeGo/hs-gs.git --recursive
 ```
 or
 ```shell
 # HTTPS
-git clone xxx --recursive
+git clone https://github.com/KaedeGo/hs-gs.git --recursive
 ```
 
 ### Setup
